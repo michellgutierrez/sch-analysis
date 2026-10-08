@@ -1,0 +1,927 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+</head><body>
+<title>Flowline LBM</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Sans+Condensed:wght@500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: lámina de planificación. Encabezado compacto, leyenda única arriba,
+   dos paneles de flujo apilados con la misma escala de tiempo, tablas al pie. */
+:root{
+  --bg:#f3f5f7; --panel:#fcfcfb; --ink:#12171c; --ink2:#46515c; --muted:#77828d;
+  --rule:#dde2e7; --band:#f1f4f6; --accent:#1c5cab; --warn:#b4541a;
+  --s1:#2a78d6; --s2:#eb6834; --s3:#1baf7a; --s4:#eda100; --s5:#e87ba4; --s6:#008300; --s7:#4a3aa7; --s8:#e34948;
+  --f-body:"IBM Plex Sans",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  --f-cond:"IBM Plex Sans Condensed","IBM Plex Sans","Arial Narrow",system-ui,sans-serif;
+  --f-mono:"IBM Plex Mono",ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#111315; --panel:#1a1a19; --ink:#f1f3f5; --ink2:#bcc3ca; --muted:#8b949d;
+    --rule:#2b2f34; --band:#202327; --accent:#6da7ec; --warn:#e89a62;
+    --s1:#3987e5; --s2:#d95926; --s3:#199e70; --s4:#c98500; --s5:#d55181; --s6:#008300; --s7:#9085e9; --s8:#e66767;
+    color-scheme:dark;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#111315; --panel:#1a1a19; --ink:#f1f3f5; --ink2:#bcc3ca; --muted:#8b949d;
+  --rule:#2b2f34; --band:#202327; --accent:#6da7ec; --warn:#e89a62;
+  --s1:#3987e5; --s2:#d95926; --s3:#199e70; --s4:#c98500; --s5:#d55181; --s6:#008300; --s7:#9085e9; --s8:#e66767;
+  color-scheme:dark;
+}
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--ink);font-family:var(--f-body);font-size:14px;line-height:1.5;margin:0}
+.wrap{max-width:1280px;margin:0 auto;padding-inline:20px;padding-block:28px 56px;display:flex;flex-direction:column;gap:22px}
+header.top{display:flex;flex-wrap:wrap;gap:8px 28px;align-items:flex-end;justify-content:space-between;border-bottom:2px solid var(--ink);padding-bottom:12px}
+h1{font-family:var(--f-cond);font-weight:600;font-size:30px;line-height:1.1;margin:0;letter-spacing:.01em;text-wrap:balance}
+.sub{color:var(--ink2);margin:4px 0 0;font-size:14px}
+.meta{font-family:var(--f-mono);font-size:11.5px;color:var(--muted);text-align:right;line-height:1.6}
+h2{font-family:var(--f-cond);font-weight:600;font-size:13px;letter-spacing:.09em;text-transform:uppercase;color:var(--ink2);margin:0 0 10px}
+.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:0;border:1px solid var(--rule);background:var(--panel)}
+.kpi{padding:14px 16px;border-right:1px solid var(--rule);min-width:0}
+.kpi:last-child{border-right:0}
+.kpi .v{font-family:var(--f-cond);font-weight:600;font-size:28px;line-height:1.1;font-variant-numeric:tabular-nums}
+.kpi .l{color:var(--ink2);font-size:12.5px;margin-top:4px}
+.kpi .d{color:var(--muted);font-size:11.5px;font-family:var(--f-mono);margin-top:4px}
+.read{color:var(--ink2);max-width:78ch;margin:0}
+.controls{display:flex;flex-wrap:wrap;gap:8px 18px;align-items:center;justify-content:space-between}
+.legend{display:flex;flex-wrap:wrap;gap:6px}
+.chip{display:inline-flex;align-items:center;gap:7px;border:1px solid var(--rule);background:var(--panel);color:var(--ink);
+  font:500 12.5px var(--f-body);padding:5px 10px 5px 8px;border-radius:3px;cursor:pointer}
+.chip i{width:16px;height:3px;border-radius:2px;display:block}
+.chip[aria-pressed="false"]{color:var(--muted);background:transparent}
+.chip[aria-pressed="false"] i{opacity:.25}
+.chip:focus-visible,.tog input:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.tog{display:inline-flex;gap:7px;align-items:center;color:var(--ink2);font-size:12.5px;cursor:pointer}
+.panel{background:var(--panel);border:1px solid var(--rule)}
+.panel-h{display:flex;flex-wrap:wrap;gap:4px 16px;justify-content:space-between;align-items:baseline;padding:10px 14px;border-bottom:1px solid var(--rule)}
+.panel-h b{font-family:var(--f-cond);font-weight:600;font-size:17px}
+.panel-h span{font-family:var(--f-mono);font-size:11px;color:var(--muted)}
+.scroll{overflow-x:auto;position:relative}
+svg{display:block}
+svg text{font-family:var(--f-mono);font-size:10px;fill:var(--muted)}
+svg .lvl{fill:var(--ink2)}
+svg .yr{font-family:var(--f-cond);font-size:12px;font-weight:600;fill:var(--ink2)}
+svg .grid{stroke:var(--rule);stroke-width:1}
+svg .gridy{stroke:var(--ink2);stroke-width:1;opacity:.35}
+svg .band{fill:var(--band)}
+svg .zone{stroke:var(--ink2);stroke-width:1;stroke-dasharray:2 3;opacity:.7}
+svg .zl{fill:var(--ink2);font-family:var(--f-cond);font-size:10.5px;font-weight:500;letter-spacing:.04em}
+svg .ms{stroke:var(--ink);stroke-width:1.25}
+svg .msl{fill:var(--ink);font-family:var(--f-cond);font-size:11px;font-weight:600}
+svg .msd{fill:var(--muted);font-size:9.5px}
+svg .today{stroke:var(--warn);stroke-width:1;stroke-dasharray:4 3}
+svg .todayl{fill:var(--warn);font-family:var(--f-cond);font-size:11px;font-weight:600}
+svg .fb{stroke:none;fill-opacity:.17}
+svg .fs{fill:none;stroke-width:2;stroke-linejoin:round;stroke-linecap:round}
+svg .ff{fill:none;stroke-width:1;stroke-linejoin:round;opacity:.75}
+svg .fo{fill:none;stroke-width:1.5;stroke-dasharray:4 3;stroke-linejoin:round}
+svg.dim g.fl:not(.hot){opacity:.22}
+svg g.fl.hot .fb{fill-opacity:.34}
+svg g.fl.hot .fs{stroke-width:3}
+svg .hl{fill:var(--ink);opacity:.06}
+.tip{position:absolute;pointer-events:none;background:var(--panel);border:1px solid var(--ink2);padding:8px 10px;font-size:12px;
+  min-width:210px;max-width:280px;box-shadow:0 4px 14px rgba(0,0,0,.14);z-index:5}
+.tip b{display:flex;align-items:center;gap:6px;font-family:var(--f-cond);font-size:13.5px}
+.tip b i{width:12px;height:3px;border-radius:2px;display:block}
+.tip table{border-collapse:collapse;margin-top:5px;width:100%}
+.tip td{padding:1px 0;font-family:var(--f-mono);font-size:11px;color:var(--ink2);white-space:nowrap}
+.tip td:first-child{padding-right:10px;color:var(--muted)}
+.tip .dl{margin-top:5px;font-family:var(--f-mono);font-size:11px;color:var(--ink)}
+.tblwrap{overflow-x:auto;background:var(--panel);border:1px solid var(--rule)}
+table.t{border-collapse:collapse;width:100%;font-size:12.5px}
+table.t th{font:600 11px var(--f-cond);letter-spacing:.07em;text-transform:uppercase;color:var(--ink2);text-align:right;padding:8px 12px;border-bottom:1px solid var(--ink2);white-space:nowrap}
+table.t th.g{text-align:center;border-bottom:1px solid var(--rule)}
+table.t td{padding:6px 12px;border-bottom:1px solid var(--rule);text-align:right;font-family:var(--f-mono);font-size:12px;font-variant-numeric:tabular-nums;white-space:nowrap}
+table.t th:first-child,table.t td:first-child{text-align:left}
+table.t td:first-child{font-family:var(--f-body);font-size:12.5px}
+table.t td .sw{display:inline-block;width:14px;height:3px;border-radius:2px;margin-right:8px;vertical-align:middle}
+table.t tr:last-child td{border-bottom:0}
+.late{color:var(--warn);font-weight:500}
+.early{color:var(--accent);font-weight:500}
+.lv-scroll{max-height:420px;overflow:auto}
+.lv-scroll thead th{position:sticky;top:0;background:var(--panel)}
+.note{color:var(--muted);font-size:12px;max-width:90ch;margin:0}
+.mskey{display:flex;flex-wrap:wrap;gap:6px 18px;font-size:12.5px;color:var(--ink2);margin:0 0 10px}
+.mskey span{display:inline-flex;align-items:center;gap:6px}
+.mskey svg{display:inline-block}
+svg .mrow{fill:var(--ink);font-family:var(--f-body);font-size:12px}
+svg .mdelta{fill:var(--ink);font-family:var(--f-mono);font-size:11px;font-weight:500}
+svg .mA{fill:var(--panel);stroke:var(--ink);stroke-width:1.75}
+svg .mlate{stroke:var(--warn);fill:var(--warn)}
+svg .mearly{stroke:var(--accent);fill:var(--accent)}
+svg .msame{stroke:var(--ink2);fill:var(--ink2)}
+svg .mlink{stroke-width:2.5;stroke-linecap:round}
+table.t td.txt{font-family:var(--f-body);font-size:12px;white-space:normal;min-width:150px}
+.grid2{display:grid;grid-template-columns:minmax(0,3fr) minmax(0,2fr);gap:22px}
+@media (max-width:900px){.grid2{grid-template-columns:minmax(0,1fr)} .meta{text-align:left} .kpi{border-right:0;border-bottom:1px solid var(--rule)}}
+
+.load{background:var(--panel);border:1px solid var(--rule);padding:16px;display:flex;flex-direction:column;gap:14px}
+.drops{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:14px}
+.drop{border:1.5px dashed var(--muted);padding:14px;display:flex;flex-direction:column;gap:8px;min-width:0;cursor:pointer}
+.drop.over{border-color:var(--accent);background:var(--band)}
+.drop.ok{border-style:solid;border-color:var(--accent)}
+.drop strong{font-family:var(--f-cond);font-size:15px;font-weight:600}
+.drop .fn{font-family:var(--f-mono);font-size:11.5px;color:var(--ink2);overflow-wrap:anywhere}
+.drop input[type=file]{font-size:12px;max-width:100%}
+.row{display:flex;flex-wrap:wrap;gap:10px 18px;align-items:flex-end}
+.fld{display:flex;flex-direction:column;gap:4px;font-size:12px;color:var(--ink2);min-width:0}
+.fld input,.fld select{font:13px var(--f-body);padding:6px 8px;border:1px solid var(--rule);background:var(--bg);color:var(--ink);border-radius:3px;max-width:100%}
+.btn{font:600 13px var(--f-body);padding:8px 16px;border-radius:3px;border:1px solid var(--accent);background:var(--accent);color:var(--panel);cursor:pointer}
+.btn.sec{background:transparent;color:var(--accent)}
+.btn:disabled{opacity:.45;cursor:not-allowed}
+.btn:focus-visible,.fld input:focus-visible,.fld select:focus-visible,textarea:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+details.cfg summary{cursor:pointer;color:var(--ink2);font-size:12.5px}
+details.cfg textarea{width:100%;height:260px;margin-top:8px;font:12px/1.45 var(--f-mono);background:var(--bg);color:var(--ink);border:1px solid var(--rule);padding:10px}
+.msg{font-size:12.5px;color:var(--ink2);margin:0}
+.msg.err{color:var(--warn);font-weight:500}
+[hidden]{display:none!important}
+.priv{font-size:12px;color:var(--muted);margin:0}
+</style>
+
+<div class="wrap">
+  <header class="top">
+    <div><h1 id="ttl">Flowline LBM</h1><p class="sub" id="sub"></p></div>
+    <div class="meta" id="meta"></div>
+  </header>
+
+  <section class="load" aria-label="Schedules">
+    <div class="drops">
+      <label class="drop" id="dropA" for="fileA"><strong data-i="dropA"></strong>
+        <span class="fn" id="fnA" data-i="pick"></span>
+        <input type="file" id="fileA" accept=".xer"></label>
+      <label class="drop" id="dropB" for="fileB"><strong data-i="dropB"></strong>
+        <span class="fn" id="fnB" data-i="pick"></span>
+        <input type="file" id="fileB" accept=".xer"></label>
+    </div>
+    <div class="row">
+      <label class="fld" for="lang"><span data-i="lang"></span><select id="lang"><option value="en">English</option><option value="es">Español</option></select></label>
+      <label class="fld" for="labA"><span data-i="labA"></span><input id="labA" size="18"></label>
+      <label class="fld" for="labB"><span data-i="labB"></span><input id="labB" size="18"></label>
+      <label class="fld" for="hoy"><span data-i="hoy"></span><input id="hoy" type="date"></label>
+      <button class="btn" id="go" type="button" disabled data-i="go"></button>
+      <button class="btn sec" id="csv" type="button" disabled data-i="csv"></button>
+    </div>
+    <p class="msg" id="msg" role="status"></p>
+    <div class="row">
+      <label class="fld" for="mode"><span data-i="mode"></span><select id="mode">
+        <option value="proposed" data-i="mProp"></option><option value="wbs" data-i="mWbs"></option><option value="custom" data-i="mCustom"></option></select></label>
+      <label class="fld" for="depth" id="depthWrap" hidden><span data-i="depth"></span><select id="depth">
+        <option value="2" data-i="d2"></option><option value="3" data-i="d3"></option><option value="4" data-i="d4"></option><option value="0" data-i="d0"></option></select></label>
+      <button class="btn sec" id="jsonLoad" type="button" data-i="jLoad"></button>
+      <input type="file" id="jsonFile" accept=".json,application/json" hidden>
+      <button class="btn sec" id="jsonSave" type="button" data-i="jSave"></button>
+    </div>
+    <p class="msg" id="modeHelp"></p>
+    <details class="cfg" id="cfgBox"><summary data-i="rules"></summary>
+      <textarea id="cfg" spellcheck="false" aria-label="JSON"></textarea></details>
+    <p class="priv" data-i="priv"></p>
+  </section>
+
+  <div id="report" hidden style="display:flex;flex-direction:column;gap:22px">
+  <section class="kpis" id="kpis" aria-label="KPIs"></section>
+
+  <p class="read" id="read"></p>
+
+  <div class="controls">
+    <div class="legend" id="legend" role="group" aria-label="Tasks"></div>
+    <label class="tog" for="ovl"><input type="checkbox" id="ovl"> <span id="ovlLbl"></span></label>
+  </div>
+
+  <div id="charts" style="display:flex;flex-direction:column;gap:18px"></div>
+
+  <section id="msSec">
+    <h2 id="h2m"></h2>
+    <p class="read" id="msRead" style="margin-bottom:10px"></p>
+    <div class="mskey" id="msKey"></div>
+    <div class="panel"><div class="scroll" id="msChart"></div></div>
+    <div class="tblwrap" style="margin-top:14px"><table class="t" id="tMs"></table></div>
+  </section>
+
+  <div class="grid2">
+    <section>
+      <h2 id="h2a"></h2>
+      <div class="tblwrap"><table class="t" id="tRitmo"></table></div>
+    </section>
+    <section>
+      <h2 id="h2b"></h2>
+      <div class="tblwrap lv-scroll"><table class="t" id="tNivel"></table></div>
+    </section>
+  </div>
+  <p class="note" id="note"></p>
+  </div>
+</div>
+
+<script>
+function renderReport(D){
+const TX={
+es:{mes:['ene','feb','mar','abr','may','jun','jul','ago','sep','oct','nov','dic'],vs:' frente a ',gen:'Generado ',days:' días',
+  read:'Cada banda es una tarea resumen que sube por el edificio. El borde grueso de la izquierda marca cuándo empieza en cada piso y el borde fino de la derecha cuándo termina. Una banda más empinada avanza más rápido; una más ancha permanece más tiempo en cada piso. El espacio en blanco entre dos bandas es un piso sin trabajo de esas tareas.',
+  ovl:'Superponer el otro cronograma (punteado)',
+  kReady:(B,A)=>'Piso listo en '+B+' frente a '+A,kReadyD:(n,lo,hi)=>'mediana de '+n+' niveles · rango '+lo+' a '+hi,
+  kStart:'Inicio de interiores por piso',kMed:'mediana, ',kWait:(a,b)=>'Espera entre «'+a+'» y «'+b+'»',kWaitD:(A,B)=>'mediana por piso, '+A+' → '+B,
+  kCyc:'Ciclo de estructura',dfl:'d/piso',kCycD:'días calendario entre pisos, mediana',
+  cnt:(c,t)=>c+' de '+t+' actividades en las bandas',prog:n=>n+' con avance real',noprog:'sin avance real cargado',
+  aria:'Bandas de flujo por nivel, ',today:'Hoy ',
+  tipEnd:(df,O)=>'Fin '+(df===0?'sin cambio':df+' días frente a '+O),tipActs:(n,w)=>n+' actividades · '+w+' días de trabajo',
+  task:'Tarea',start:'Inicio',fin:'Fin',dEnd:'Δ fin',level:'Nivel',dDays:'Δ días',wait:'Espera ',h2a:'Ritmo por tarea',h2b:'Piso listo, por nivel',
+  note:(rt,wf,B)=>'«Piso listo» es el fin de «'+rt+'». «Espera» son los días calendario entre el fin de «'+wf+'» y el inicio de «'+rt+'» en el mismo piso. d/piso es la mediana de días calendario entre inicios de pisos consecutivos. Fechas tempranas del cronograma, o reales cuando la actividad tiene avance. Δ positivo significa más tarde en '+B+'.',
+  h2m:'Movimiento de hitos',msRead:(A,B)=>'Cada fila es un hito. El círculo vacío es su fecha en '+A+' y el círculo lleno su fecha en '+B+'. La línea que los une es el desplazamiento, en días calendario.',
+  later:'más tarde',earlier:'antes',same:'sin cambio',ms:'Hito',shift:'Desplazamiento',cstr:'Restricción',flt:'Holgura (d)',none:'ninguna',msAria:'Movimiento de hitos',
+  onlyIn:s=>'solo en '+s,
+  C:{CS_MEOB:'Terminar a más tardar el',CS_MEO:'Terminar el',CS_MEOA:'Terminar no antes del',CS_MSO:'Iniciar el',CS_MSOA:'Iniciar no antes del',CS_MSOB:'Iniciar a más tardar el',CS_MANDFIN:'Fin obligatorio',CS_MANDSTART:'Inicio obligatorio',CS_ALAP:'Lo más tarde posible'}},
+en:{mes:['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'],vs:' vs ',gen:'Generated ',days:' days',
+  read:'Each band is a summary task moving up the building. The thick left edge marks when it starts on each floor and the thin right edge when it finishes. A steeper band moves faster; a wider band stays longer on each floor. White space between two bands is a floor with none of those tasks under way.',
+  ovl:'Overlay the other schedule (dashed)',
+  kReady:(B,A)=>'Floor ready in '+B+' vs '+A,kReadyD:(n,lo,hi)=>'median of '+n+' levels · range '+lo+' to '+hi,
+  kStart:'Interior start per floor',kMed:'median, ',kWait:(a,b)=>'Wait between “'+a+'” and “'+b+'”',kWaitD:(A,B)=>'median per floor, '+A+' → '+B,
+  kCyc:'Structure cycle',dfl:'d/floor',kCycD:'calendar days between floors, median',
+  cnt:(c,t)=>c+' of '+t+' activities in the bands',prog:n=>n+' with actual progress',noprog:'no actual progress loaded',
+  aria:'Flow bands by level, ',today:'Today ',
+  tipEnd:(df,O)=>'Finish '+(df===0?'unchanged':df+' days vs '+O),tipActs:(n,w)=>n+' activities · '+w+' work days',
+  task:'Task',start:'Start',fin:'Finish',dEnd:'Δ finish',level:'Level',dDays:'Δ days',wait:'Wait, ',h2a:'Pace by task',h2b:'Floor ready, by level',
+  note:(rt,wf,B)=>'“Floor ready” is the finish of “'+rt+'”. “Wait” is the calendar days between the finish of “'+wf+'” and the start of “'+rt+'” on the same floor. d/floor is the median calendar days between starts on consecutive floors. Dates are early dates from the schedule, or actual dates where an activity has progress. A positive Δ means later in '+B+'.',
+  h2m:'Milestone movement',msRead:(A,B)=>'Each row is a milestone. The hollow circle is its date in '+A+' and the filled circle its date in '+B+'. The line between them is the shift, in calendar days.',
+  later:'later',earlier:'earlier',same:'no change',ms:'Milestone',shift:'Shift',cstr:'Constraint',flt:'Float (d)',none:'none',msAria:'Milestone movement',
+  onlyIn:s=>'only in '+s,
+  C:{CS_MEOB:'Finish on or before',CS_MEO:'Finish on',CS_MEOA:'Finish on or after',CS_MSO:'Start on',CS_MSOA:'Start on or after',CS_MSOB:'Start on or before',CS_MANDFIN:'Mandatory finish',CS_MANDSTART:'Mandatory start',CS_ALAP:'As late as possible'}}
+}[D.lang]||null;
+const MES=TX.mes;
+const day=864e5, P=s=>{const a=s.split('-');return Date.UTC(+a[0],+a[1]-1,+a[2])};
+const fd=s=>{if(!s)return '–';const a=s.split('-');return a[2]+'-'+MES[+a[1]-1]+'-'+a[0].slice(2)};
+const dd=(a,b)=>Math.round((P(b)-P(a))/day);
+const sgn=n=>(n>0?'+':'')+n;
+const NS='http://www.w3.org/2000/svg';
+const el=(n,at,tx)=>{const e=document.createElementNS(NS,n);for(const k in at)e.setAttribute(k,at[k]);if(tx!=null)e.textContent=tx;return e};
+const col=i=>'var(--s'+(i+1)+')';
+const T=D.tasks, L=D.levels, A=D.sched[0], B=D.sched[1];
+const on={}; T.forEach(t=>on[t.id]=true);
+let overlay=false;
+
+document.getElementById('ttl').textContent=D.title;
+document.getElementById('sub').textContent=D.subtitle+' · '+A.label+TX.vs+B.label;
+document.getElementById('read').textContent=TX.read;document.getElementById('ovlLbl').textContent=TX.ovl;
+document.getElementById('h2a').textContent=TX.h2a;document.getElementById('h2b').textContent=TX.h2b;
+document.getElementById('meta').innerHTML=[A,B].map(s=>s.label+': '+s.file.replace(/^[0-9a-f]{8}-/,'')+' · data date '+fd(s.dataDate)).join('<br>')+'<br>'+TX.gen+fd(D.generated);
+
+/* ---------- dominio de tiempo ---------- */
+let t0=Infinity,t1=-Infinity;
+D.sched.forEach(s=>{for(const k in s.cells)for(const l in s.cells[k]){t0=Math.min(t0,P(s.cells[k][l][0]));t1=Math.max(t1,P(s.cells[k][l][1]))}
+  s.milestones.forEach(m=>{t1=Math.max(t1,P(m.date))})});
+{const a=new Date(t0);t0=Date.UTC(a.getUTCFullYear(),a.getUTCMonth(),1);const b=new Date(t1);t1=Date.UTC(b.getUTCFullYear(),b.getUTCMonth()+1,1)}
+
+/* ---------- indicadores ---------- */
+function med(a){if(!a.length)return null;a=a.slice().sort((x,y)=>x-y);const m=a.length>>1;return a.length%2?a[m]:(a[m-1]+a[m])/2}
+const rt=D.readyTask, wf=D.waitFrom;
+function cell(s,t,l){return (s.cells[t]||{})[l]}
+const dReady=[],waitA=[],waitB=[],dStart=[];
+L.forEach(l=>{const a=cell(A,rt,l),b=cell(B,rt,l);if(a&&b)dReady.push(dd(a[1],b[1]));
+  const wa=cell(A,wf,l),wb=cell(B,wf,l);if(a&&wa)waitA.push(dd(wa[1],a[0]));if(b&&wb)waitB.push(dd(wb[1],b[0]));
+  const ra=cell(A,'roughin',l),rb=cell(B,'roughin',l);if(ra&&rb)dStart.push(dd(ra[0],rb[0]))});
+const tl=id=>(T.find(t=>t.id===id)||{label:id}).label;
+const k=[];
+if(dReady.length){const m=med(dReady);k.push([sgn(Math.round(m))+TX.days,TX.kReady(B.label,A.label),TX.kReadyD(dReady.length,sgn(Math.min(...dReady)),sgn(Math.max(...dReady)))])}
+if(dStart.length){const m=med(dStart);k.push([sgn(Math.round(m))+TX.days,TX.kStart,TX.kMed+tl('roughin')])}
+if(waitA.length&&waitB.length){k.push([Math.round(med(waitA))+' → '+Math.round(med(waitB))+TX.days,TX.kWait(tl(wf),tl(rt)),TX.kWaitD(A.label,B.label)])}
+{const sa=A.stats.estructura,sb=B.stats.estructura;if(sa&&sb&&sa.takt!=null)k.push([sa.takt+' → '+sb.takt+' '+TX.dfl,TX.kCyc,TX.kCycD])}
+document.getElementById('kpis').innerHTML=k.map(x=>'<div class="kpi"><div class="v">'+x[0]+'</div><div class="l">'+x[1]+'</div><div class="d">'+x[2]+'</div></div>').join('');
+
+/* ---------- leyenda ---------- */
+const lg=document.getElementById('legend');lg.innerHTML='';document.getElementById('ovl').checked=false;
+T.forEach((t,i)=>{const b=document.createElement('button');b.className='chip';b.type='button';b.setAttribute('aria-pressed','true');b.title=t.desc;
+  b.innerHTML='<i style="background:'+col(i)+'"></i>'+t.label;
+  b.onclick=()=>{on[t.id]=!on[t.id];b.setAttribute('aria-pressed',on[t.id]);draw()};lg.appendChild(b)});
+document.getElementById('ovl').onchange=e=>{overlay=e.target.checked;draw()};
+
+/* ---------- gráfico ---------- */
+const host=document.getElementById('charts');
+const RH=13, M={l:76,r:64,t:76,b:30};
+function draw(){
+  host.innerHTML='';
+  const W=Math.max(900,host.clientWidth-2);
+  D.sched.forEach((S,si)=>host.appendChild(panel(S,D.sched[1-si],W)));
+}
+function panel(S,O,W){
+  const H=M.t+L.length*RH+M.b, iw=W-M.l-M.r;
+  const x=t=>M.l+(t-t0)/(t1-t0)*iw;
+  const yTop=i=>M.t+(L.length-1-i)*RH, yBot=i=>yTop(i)+RH;
+  const box=document.createElement('section');box.className='panel';
+  const c=S.counts;
+  box.innerHTML='<div class="panel-h"><b>'+S.label+'</b><span>'+TX.cnt(c.classified,c.total)+' · '+(c.with_progress?TX.prog(c.with_progress):TX.noprog)+'</span></div>';
+  const sc=document.createElement('div');sc.className='scroll';box.appendChild(sc);
+  const svg=el('svg',{width:W,height:H,viewBox:'0 0 '+W+' '+H,role:'img','aria-label':TX.aria+S.label});sc.appendChild(svg);
+  /* bandas y niveles */
+  L.forEach((l,i)=>{if(i%2===0)svg.appendChild(el('rect',{class:'band',x:M.l,y:yTop(i),width:iw,height:RH}));
+    svg.appendChild(el('text',{class:'lvl',x:M.l-8,y:yTop(i)+RH/2+3.5,'text-anchor':'end'},D.levelLabels[l]))});
+  /* tiempo */
+  for(let d=new Date(t0);d.getTime()<=t1;d.setUTCMonth(d.getUTCMonth()+1)){
+    const m=d.getUTCMonth(),X=x(d.getTime());
+    if(m%3===0)svg.appendChild(el('line',{class:m===0?'gridy':'grid',x1:X,x2:X,y1:M.t,y2:H-M.b}));
+    if(m%3===0&&d.getTime()<t1)svg.appendChild(el('text',{x:X+3,y:H-M.b+12},MES[m]));
+    if((m===0||d.getTime()===t0)&&d.getTime()<t1)svg.appendChild(el('text',{class:'yr',x:X+3,y:H-M.b+25},d.getUTCFullYear()));
+  }
+  svg.appendChild(el('line',{class:'gridy',x1:M.l,x2:M.l+iw,y1:H-M.b,y2:H-M.b}));
+  /* zonas */
+  let prevY=H-M.b;
+  D.zones.forEach(z=>{const i=L.indexOf(z.above_level);if(i<0)return;const Y=yTop(i);
+    svg.appendChild(el('line',{class:'zone',x1:M.l,x2:M.l+iw+6,y1:Y,y2:Y}));
+    svg.appendChild(el('text',{class:'zl',x:M.l+iw+8,y:(Y+prevY)/2+4},z.label));prevY=Y});
+  /* resaltado de fila */
+  const hl=el('rect',{class:'hl',x:M.l,y:0,width:iw,height:RH,visibility:'hidden'});svg.appendChild(hl);
+  /* hoy */
+  if(D.today&&P(D.today)>t0&&P(D.today)<t1){const X=x(P(D.today));
+    svg.appendChild(el('line',{class:'today',x1:X,x2:X,y1:M.t-6,y2:H-M.b}));
+    svg.appendChild(el('text',{class:'todayl',x:X,y:H-4,'text-anchor':'middle'},TX.today+fd(D.today)))}
+  /* líneas de flujo */
+  /* tramos contiguos de niveles donde la tarea existe */
+  function runs(sch,tid){const out=[];let cur=null;
+    L.forEach((l,i)=>{const c=cell(sch,tid,l);if(!c){cur=null;return}if(!cur){cur=[];out.push(cur)}cur.push([i,x(P(c[0])),x(P(c[1])+day)])});return out}
+  /* frente de avance: pasa por la mitad de cada nivel y se prolonga a los bordes del tramo */
+  function front(run,k){const n=run.length,p=[[run[0][k],yBot(run[0][0])]];
+    run.forEach(r=>p.push([r[k],yTop(r[0])+RH/2]));p.push([run[n-1][k],yTop(run[n-1][0])]);return p}
+  const pts=p=>p.map(q=>q[0].toFixed(1)+' '+q[1].toFixed(1)).join('L');
+  const lines={};
+  if(overlay)T.forEach((t,i)=>{if(!on[t.id])return;runs(O,t.id).forEach(r=>{
+    svg.appendChild(el('path',{class:'fo',d:'M'+pts(front(r,1)),stroke:col(i),opacity:.5}));
+    svg.appendChild(el('path',{class:'fo',d:'M'+pts(front(r,2)),stroke:col(i),opacity:.9}))})});
+  T.forEach((t,i)=>{if(!on[t.id])return;const rs=runs(S,t.id);if(!rs.length)return;const g=el('g',{class:'fl'});
+    rs.forEach(r=>{const a=front(r,1),b=front(r,2);
+      g.appendChild(el('path',{class:'fb',d:'M'+pts(a)+'L'+pts(b.slice().reverse())+'Z',fill:col(i)}));
+      g.appendChild(el('path',{class:'ff',d:'M'+pts(b),stroke:col(i)}));
+      g.appendChild(el('path',{class:'fs',d:'M'+pts(a),stroke:col(i)}))});
+    svg.appendChild(g);lines[t.id]=g});
+  /* hitos */
+  const rows=[[],[],[]];
+  S.milestones.slice().sort((a,b)=>P(a.date)-P(b.date)).forEach(m=>{
+    const X=x(P(m.date)+day);let lo=0,hi=L.length-1;
+    if(m.levels){const inr=L.map((l,i)=>l>=m.levels[0]&&l<=m.levels[1]?i:-1).filter(i=>i>=0);if(!inr.length)return;lo=inr[0];hi=inr[inr.length-1]}
+    svg.appendChild(el('line',{class:'ms',x1:X,x2:X,y1:yTop(hi),y2:yBot(lo)}));
+    svg.appendChild(el('line',{class:'grid',x1:X,x2:X,y1:M.t-4,y2:yTop(hi)}));
+    const w=Math.max(m.label.length*6.4,52)+8;let r=0;
+    while(r<2&&rows[r].some(p=>Math.abs(p[0]-X)<(p[1]+w)/2))r++;
+    rows[r].push([X,w]);const Y=M.t-20-r*23;
+    svg.appendChild(el('line',{class:'grid',x1:X,x2:X,y1:Y+12,y2:M.t-4}));
+    svg.appendChild(el('text',{class:'msl',x:X,y:Y,'text-anchor':'middle'},m.label));
+    svg.appendChild(el('text',{class:'msd',x:X,y:Y+10,'text-anchor':'middle'},fd(m.date)))});
+  /* interacción */
+  const tip=document.createElement('div');tip.className='tip';tip.hidden=true;sc.appendChild(tip);
+  const hit=el('rect',{x:M.l,y:M.t,width:iw,height:L.length*RH,fill:'transparent'});svg.appendChild(hit);
+  function leave(){tip.hidden=true;hl.setAttribute('visibility','hidden');svg.classList.remove('dim');for(const k in lines)lines[k].classList.remove('hot')}
+  hit.addEventListener('pointerleave',leave);
+  hit.addEventListener('pointermove',ev=>{
+    const r=svg.getBoundingClientRect(),px=ev.clientX-r.left,py=ev.clientY-r.top;
+    const i=L.length-1-Math.floor((py-M.t)/RH);if(i<0||i>=L.length){leave();return}
+    const l=L[i],tt=t0+(px-M.l)/iw*(t1-t0);let best=null,bd=Infinity;
+    T.forEach((t,ti)=>{if(!on[t.id])return;const c=cell(S,t.id,l);if(!c)return;
+      const a=P(c[0]),b=P(c[1])+day;let d;
+      if(tt>=a&&tt<=b)d=-1e15+(b-a);            /* dentro de la banda: gana la más angosta */
+      else d=Math.min(Math.abs(tt-a),Math.abs(tt-b));
+      if(d<bd){bd=d;best=[t,ti,c]}});
+    if(!best||(bd>0&&bd/(t1-t0)*iw>40)){leave();return}
+    const [t,ti,c]=best,o=cell(O,t.id,l);
+    hl.setAttribute('y',yTop(i));hl.setAttribute('visibility','visible');
+    svg.classList.add('dim');for(const k in lines)lines[k].classList.toggle('hot',k===t.id);
+    let h='<b><i style="background:'+col(ti)+'"></i>'+t.label+' · '+D.levelLabels[l]+'</b><table>'+
+      '<tr><td>'+S.label+'</td><td>'+fd(c[0])+' → '+fd(c[1])+'</td></tr>';
+    if(o)h+='<tr><td>'+O.label+'</td><td>'+fd(o[0])+' → '+fd(o[1])+'</td></tr>';
+    h+='</table>';
+    if(o){const df=dd(o[1],c[1]);h+='<div class="dl">'+TX.tipEnd(df===0?0:sgn(df),O.label)+'</div>'}
+    h+='<div class="dl" style="color:var(--muted)">'+TX.tipActs(c[2],c[3])+'</div>';
+    tip.innerHTML=h;tip.hidden=false;
+    const tw=tip.offsetWidth,th=tip.offsetHeight;let lx=px+sc.scrollLeft+14,ly=py+14;
+    if(px+14+tw>sc.clientWidth)lx=px+sc.scrollLeft-tw-14;if(ly+th>H)ly=py-th-10;
+    tip.style.left=Math.max(4,lx)+'px';tip.style.top=Math.max(4,ly)+'px'});
+  return box;
+}
+draw();
+let rz;window.onresize=()=>{clearTimeout(rz);rz=setTimeout(draw,120)};
+
+/* ---------- tablas ---------- */
+const cls=n=>n>0?'late':(n<0?'early':'');
+let h='<thead><tr><th rowspan="2">'+TX.task+'</th><th class="g" colspan="3">'+A.label+'</th><th class="g" colspan="3">'+B.label+'</th><th rowspan="2">'+TX.dEnd+'</th></tr>'+
+  '<tr>'+('<th>'+TX.start+'</th><th>'+TX.fin+'</th><th>'+TX.dfl+'</th>').repeat(2)+'</tr></thead><tbody>';
+T.forEach((t,i)=>{const a=A.stats[t.id],b=B.stats[t.id];if(!a&&!b)return;const df=a&&b?dd(a.last,b.last):null;
+  h+='<tr><td title="'+t.desc+'"><span class="sw" style="background:'+col(i)+'"></span>'+t.label+'</td>'+
+  [a,b].map(s=>s?'<td>'+fd(s.first)+'</td><td>'+fd(s.last)+'</td><td>'+(s.takt==null?'–':s.takt)+'</td>':'<td>–</td><td>–</td><td>–</td>').join('')+
+  '<td class="'+(df==null?'':cls(df))+'">'+(df==null?'–':sgn(df))+'</td></tr>'});
+document.getElementById('tRitmo').innerHTML=h+'</tbody>';
+
+h='<thead><tr><th>'+TX.level+'</th><th>'+A.label+'</th><th>'+B.label+'</th><th>'+TX.dDays+'</th><th>'+TX.wait+B.label+'</th></tr></thead><tbody>';
+L.slice().reverse().forEach(l=>{const a=cell(A,rt,l),b=cell(B,rt,l);if(!a&&!b)return;const df=a&&b?dd(a[1],b[1]):null;
+  const wb=cell(B,wf,l),w=b&&wb?dd(wb[1],b[0]):null;
+  h+='<tr><td>'+D.levelLabels[l]+'</td><td>'+(a?fd(a[1]):'–')+'</td><td>'+(b?fd(b[1]):'–')+'</td><td class="'+(df==null?'':cls(df))+'">'+(df==null?'–':sgn(df))+'</td><td>'+(w==null?'–':w+' d')+'</td></tr>'});
+document.getElementById('tNivel').innerHTML=h+'</tbody>';
+document.getElementById('note').textContent=TX.note(tl(rt),tl(wf),B.label);
+
+/* ---------- movimiento de hitos ---------- */
+(function(){
+  const MC=(D.msCompare||[]).slice().sort((p,q)=>P((p.a||p.b).date)-P((q.a||q.b).date));
+  const sec=document.getElementById('msSec');sec.hidden=!MC.length;if(!MC.length)return;
+  document.getElementById('h2m').textContent=TX.h2m;document.getElementById('msRead').textContent=TX.msRead(A.label,B.label);
+  const dot=(c)=>'<svg width="14" height="14"><circle cx="7" cy="7" r="4.5" class="'+c+'"/></svg>';
+  const bar=(c)=>'<svg width="22" height="14"><line x1="2" y1="7" x2="20" y2="7" class="mlink '+c+'"/></svg>';
+  document.getElementById('msKey').innerHTML='<span>'+dot('mA')+A.label+'</span><span>'+dot('msame')+B.label+'</span><span>'+bar('mlate')+TX.later+'</span><span>'+bar('mearly')+TX.earlier+'</span>';
+  const cst=s=>!s?'–':(s.cstr?(TX.C[s.cstr]||s.cstr)+(s.cstrDate?' '+fd(s.cstrDate):''):TX.none);
+  const dl=m=>m.a&&m.b?dd(m.a.date,m.b.date):null;
+  const kc=n=>n>0?'mlate':(n<0?'mearly':'msame');
+  const host2=document.getElementById('msChart');
+  function drawMs(){
+    host2.innerHTML='';
+    const W=Math.max(820,host2.clientWidth),RH2=28,m2={l:210,r:84,t:24,b:34},H=m2.t+MC.length*RH2+m2.b,iw=W-m2.l-m2.r;
+    let a0=Infinity,a1=-Infinity;MC.forEach(m=>[m.a,m.b].forEach(s=>{if(s){a0=Math.min(a0,P(s.date));a1=Math.max(a1,P(s.date))}}));
+    {const a=new Date(a0);a0=Date.UTC(a.getUTCFullYear(),a.getUTCMonth()-1,1);const b=new Date(a1);a1=Date.UTC(b.getUTCFullYear(),b.getUTCMonth()+2,1)}
+    const x=t=>m2.l+(t-a0)/(a1-a0)*iw;
+    const svg=el('svg',{width:W,height:H,viewBox:'0 0 '+W+' '+H,role:'img','aria-label':TX.msAria});host2.appendChild(svg);
+    MC.forEach((m,i)=>{if(i%2===0)svg.appendChild(el('rect',{class:'band',x:0,y:m2.t+i*RH2,width:W,height:RH2}))});
+    for(let d=new Date(a0);d.getTime()<=a1;d.setUTCMonth(d.getUTCMonth()+1)){
+      const mo=d.getUTCMonth(),X=x(d.getTime());
+      if(mo%3===0){svg.appendChild(el('line',{class:mo===0?'gridy':'grid',x1:X,x2:X,y1:m2.t,y2:H-m2.b}));
+        if(d.getTime()<a1)svg.appendChild(el('text',{x:X+3,y:H-m2.b+12},MES[mo]))}
+      if((mo===0||d.getTime()===a0)&&d.getTime()<a1)svg.appendChild(el('text',{class:'yr',x:X+3,y:H-m2.b+26},d.getUTCFullYear()));
+    }
+    if(D.today&&P(D.today)>a0&&P(D.today)<a1){const X=x(P(D.today));svg.appendChild(el('line',{class:'today',x1:X,x2:X,y1:m2.t,y2:H-m2.b}));
+      svg.appendChild(el('text',{class:'todayl',x:X+5,y:m2.t-8},TX.today+fd(D.today)))}
+    const tip=document.createElement('div');tip.className='tip';tip.hidden=true;host2.appendChild(tip);
+    MC.forEach((m,i)=>{
+      const y=m2.t+i*RH2+RH2/2,n=dl(m),c=n==null?'msame':kc(n);
+      svg.appendChild(el('text',{class:'mrow',x:m2.l-12,y:y+4,'text-anchor':'end'},m.label));
+      const xa=m.a?x(P(m.a.date)):null,xb=m.b?x(P(m.b.date)):null;
+      const near=xa!=null&&xb!=null&&Math.abs(xa-xb)<9;
+      if(xa!=null&&xb!=null&&!near)svg.appendChild(el('line',{class:'mlink '+c,x1:xa,x2:xb,y1:y,y2:y}));
+      if(xb!=null)svg.appendChild(el('circle',{class:c,cx:xb,cy:y,r:5,stroke:'var(--panel)','stroke-width':2,style:'stroke:var(--panel)'}));
+      if(xa!=null)svg.appendChild(el('circle',{class:'mA',cx:near?xb:xa,cy:y,r:near?8:5,style:near?'fill:none':''}));
+      const xr=Math.max(xa==null?-1:xa,xb==null?-1:xb)+(near?3:0);
+      svg.appendChild(el('text',{class:'mdelta',x:xr+11,y:y+4},n==null?TX.onlyIn(m.a?A.label:B.label):(n===0?TX.same:sgn(n)+' d')));
+      const hit=el('rect',{x:0,y:m2.t+i*RH2,width:W,height:RH2,fill:'transparent'});svg.appendChild(hit);
+      hit.addEventListener('pointerleave',()=>{tip.hidden=true});
+      hit.addEventListener('pointermove',ev=>{
+        const r=svg.getBoundingClientRect(),px=ev.clientX-r.left,py=ev.clientY-r.top;
+        let h='<b>'+m.label+'</b><table>';
+        [[A,m.a],[B,m.b]].forEach(([S,s])=>{h+='<tr><td>'+S.label+'</td><td>'+(s?fd(s.date):'–')+'</td></tr>'});h+='</table>';
+        if(n!=null)h+='<div class="dl">'+(n===0?TX.same:sgn(n)+TX.days+' · '+(n>0?TX.later:TX.earlier))+'</div>';
+        [[A,m.a],[B,m.b]].forEach(([S,s])=>{if(s)h+='<div class="dl" style="color:var(--muted);white-space:normal">'+S.label+': '+cst(s)+(s.tf==null?'':' · '+TX.flt.replace(' (d)','')+' '+s.tf+' d')+'</div>'});
+        tip.innerHTML=h;tip.hidden=false;const tw=tip.offsetWidth,th=tip.offsetHeight;
+        let lx=px+host2.scrollLeft+14,ly=py+14;if(px+14+tw>host2.clientWidth)lx=px+host2.scrollLeft-tw-14;if(ly+th>H)ly=py-th-10;
+        tip.style.left=Math.max(4,lx)+'px';tip.style.top=Math.max(4,ly)+'px'});
+    });
+  }
+  drawMs();let rz2;if(window.__msRz)window.removeEventListener('resize',window.__msRz);window.__msRz=()=>{clearTimeout(rz2);rz2=setTimeout(drawMs,140)};window.addEventListener('resize',window.__msRz);
+  let h='<thead><tr><th rowspan="2">'+TX.ms+'</th><th rowspan="2">'+A.label+'</th><th rowspan="2">'+B.label+'</th><th rowspan="2">'+TX.shift+'</th>'+
+    '<th class="g" colspan="2">'+TX.cstr+'</th><th class="g" colspan="2">'+TX.flt+'</th></tr><tr><th>'+A.label+'</th><th>'+B.label+'</th><th>'+A.label+'</th><th>'+B.label+'</th></tr></thead><tbody>';
+  MC.forEach(m=>{const n=dl(m);
+    h+='<tr><td>'+m.label+'</td><td>'+(m.a?fd(m.a.date):'–')+'</td><td>'+(m.b?fd(m.b.date):'–')+'</td>'+
+      '<td class="'+(n==null?'':cls(n))+'">'+(n==null?'–':(n===0?'0':sgn(n)+' d · '+(n>0?TX.later:TX.earlier)))+'</td>'+
+      '<td class="txt">'+cst(m.a)+'</td><td class="txt">'+cst(m.b)+'</td>'+
+      '<td>'+(m.a&&m.a.tf!=null?m.a.tf:'–')+'</td><td>'+(m.b&&m.b.tf!=null?m.b.tf:'–')+'</td></tr>'});
+  document.getElementById('tMs').innerHTML=h+'</tbody>';
+})();
+}
+
+/* ====================================================================== */
+/*  XER parsing and band building, all in the browser                      */
+/* ====================================================================== */
+const DEFAULT_CONFIG = {
+  "title": "Domus II Flowline",
+  "subtitle": "Líneas de flujo por nivel · gestión basada en ubicación",
+  "subtitle_en": "Flowlines by level · location-based management",
+  "level_regex_code": "^C-(\\d\\d)-",
+  "level_regex_name": "",
+  "level_min": 1,
+  "level_max": 99,
+  "level_labels": {
+    "36": "L36 Pool",
+    "37": "Roof",
+    "38": "Upper roof"
+  },
+  "tasks": [
+    {
+      "id": "estructura",
+      "label": "Estructura",
+      "label_en": "Structure",
+      "desc_en": "Formwork, rebar, post-tensioning, slab pour and verticals",
+      "desc": "Encofrado, acero, postensado, vaciado de losa y verticales",
+      "code": "^C-\\d\\d-(ST-1\\d\\d|MP-120)$"
+    },
+    {
+      "id": "envolvente",
+      "label": "Envolvente",
+      "label_en": "Envelope",
+      "desc_en": "Exterior masonry and glazing",
+      "desc": "Mampostería exterior y vidriería",
+      "code": "^C-\\d\\d-(ST-4\\d\\d|EX-1\\d\\d)$"
+    },
+    {
+      "id": "roughin",
+      "label": "Tabiquería y MEP rough-in",
+      "label_en": "Framing and MEP rough-in",
+      "desc_en": "Layout, framing, risers and MEP rough-in through inspection",
+      "desc": "Trazo, framing, montantes y rough-in MEP hasta inspección",
+      "code": "^C-\\d\\d-(U|UC|IN)-(FN-1\\d\\d|MP-1\\d\\d)$"
+    },
+    {
+      "id": "drywall",
+      "label": "Drywall y pintura base",
+      "label_en": "Drywall and prime paint",
+      "desc_en": "Drywall, ceilings, taping, doors and first coat",
+      "desc": "Cerramiento de drywall, cielos, masillado, puertas y primera mano",
+      "code": "^C-\\d\\d-(U|UC|IN)-FN-2[0-7]\\d$"
+    },
+    {
+      "id": "acabados",
+      "label": "Acabados y equipos",
+      "label_en": "Finishes and equipment",
+      "desc_en": "Tile, flooring, kitchens, fixtures, equipment, MEP trim and corridors",
+      "desc": "Enchapes, pisos, cocinas, aparatos, equipos, trim MEP y corredores",
+      "code": "^C-\\d\\d-((U|UC|IN)-(FN-(2[89]|3\\d|4\\d)\\d|MP-[2-4]\\d\\d)|C-(FN-1[0-8]\\d|MP-\\d+))$"
+    },
+    {
+      "id": "punch_gc",
+      "label": "Inspección y punch contratista",
+      "label_en": "Inspection and contractor punch",
+      "desc_en": "Partial MEP inspection, subcontractor punch and GC punch",
+      "desc": "Inspección parcial MEP, punch de subcontratistas y punch del contratista general",
+      "code": "^C-\\d\\d-(U|UC|IN)-PC-9[0-2]\\d$"
+    },
+    {
+      "id": "punch_owner",
+      "label": "Limpieza final y punch Owner",
+      "label_en": "Final clean and Owner punch",
+      "desc_en": "Final cleanup and Owner/Architect punch list",
+      "desc": "Limpieza final y punch list del propietario y arquitecto",
+      "code": "^C-\\d\\d-((U|UC|IN)-PC-9[3-9]\\d|C-FN-19\\d)$"
+    }
+  ],
+  "ready_task": "punch_gc",
+  "wait_from_task": "acabados",
+  "milestones": [
+    {
+      "code": "PR-MS-540",
+      "label": "Energía perm.",
+      "label_en": "Perm. power",
+      "levels": null
+    },
+    {
+      "code": "PR-MS-200",
+      "label": "MS#1",
+      "levels": [
+        2,
+        15
+      ]
+    },
+    {
+      "code": "PR-MS-300",
+      "label": "MS#2",
+      "levels": [
+        16,
+        25
+      ]
+    },
+    {
+      "code": "PR-MS-400",
+      "label": "MS#3",
+      "levels": [
+        26,
+        35
+      ]
+    },
+    {
+      "code": "PR-MS-800",
+      "label": "TCO",
+      "levels": null,
+      "only": "A"
+    },
+    {
+      "code": "PR-MS-800",
+      "label": "TCO#1",
+      "levels": [
+        1,
+        14
+      ],
+      "only": "B"
+    },
+    {
+      "code": "PR-MS-910",
+      "label": "TCO#2",
+      "levels": [
+        15,
+        99
+      ],
+      "only": "B"
+    }
+  ],
+  "milestone_compare": [
+    {
+      "label": "Tope de estructura",
+      "label_en": "Structure top-out",
+      "code": "PR-MS-520"
+    },
+    {
+      "label": "Permiso lobby/cocina",
+      "label_en": "Kitchen/lobby permit",
+      "code": "MS-KL-100"
+    },
+    {
+      "label": "Energía permanente",
+      "label_en": "Permanent power",
+      "code": "PR-MS-540"
+    },
+    {
+      "label": "Retiro de grúa torre",
+      "label_en": "Tower crane removed",
+      "code": "PR-MS-550"
+    },
+    {
+      "label": "Vidriería exterior completa",
+      "label_en": "Exterior glazing complete",
+      "code": "PR-MS-570"
+    },
+    {
+      "label": "Retiro de buckhoists",
+      "label_en": "Buckhoists removed",
+      "code": "PR-MS-580"
+    },
+    {
+      "label": "MS#1 llaves L2–L15",
+      "label_en": "MS#1 key delivery L2–L15",
+      "code": "PR-MS-200"
+    },
+    {
+      "label": "MS#2 llaves L16–L25",
+      "label_en": "MS#2 key delivery L16–L25",
+      "code": "PR-MS-300"
+    },
+    {
+      "label": "MS#3 llaves L26–L35",
+      "label_en": "MS#3 key delivery L26–L35",
+      "code": "PR-MS-400"
+    },
+    {
+      "label": "Medidor de agua y conveyance",
+      "label_en": "Conveyance & water meter",
+      "code": "PR-MS-600"
+    },
+    {
+      "label": "TCO pisos 1–14",
+      "label_en": "TCO levels 1–14",
+      "code_a": "PR-MS-800",
+      "code_b": "PR-MS-800"
+    },
+    {
+      "label": "TCO pisos 15–36",
+      "label_en": "TCO levels 15–36",
+      "code_a": "PR-MS-800",
+      "code_b": "PR-MS-910"
+    },
+    {
+      "label": "Final Completion",
+      "label_en": "Final completion",
+      "code": "PR-MS-900"
+    }
+  ],
+  "zones": [
+    {
+      "above_level": 15,
+      "label": "L2–L15"
+    },
+    {
+      "above_level": 25,
+      "label": "L16–L25"
+    },
+    {
+      "above_level": 35,
+      "label": "L26–L35"
+    }
+  ]
+};
+
+function parseXer(text){
+  const tables={},want={PROJECT:1,TASK:1,PROJWBS:1};let cur=null,cols=[];
+  for(const raw of text.split('\n')){
+    const line=raw.endsWith('\r')?raw.slice(0,-1):raw,p=line.split('\t'),tag=p[0];
+    if(tag==='%T'){cur=want[p[1]]?p[1]:null;if(cur)tables[cur]=[]}
+    else if(tag==='%F'&&cur){cols=p.slice(1)}
+    else if(tag==='%R'&&cur){const o={};for(let i=0;i<cols.length;i++)o[cols[i]]=p[i+1]||'';tables[cur].push(o)}
+  }
+  if(!tables.TASK)throw new Error('NO_TASK');
+  return tables;
+}
+const pdate=s=>{s=(s||'').trim().slice(0,10);return /^\d{4}-\d{2}-\d{2}$/.test(s)?s:null};
+const dnum=s=>{const a=s.split('-');return Date.UTC(+a[0],+a[1]-1,+a[2])/864e5};
+function median(a){a=a.slice().sort((x,y)=>x-y);const m=a.length>>1;return a.length%2?a[m]:(a[m-1]+a[m])/2}
+const r1=n=>Math.round(n*10)/10;
+const loc=(o,k,lang)=>o[k+'_'+lang]||o[k]||'';
+
+/* WBS helpers: path from the top node down (project node excluded), and a level-free name */
+function wbsPaths(tb){
+  const W={};(tb.PROJWBS||[]).forEach(w=>W[w.wbs_id]=w);const memo={};
+  return id=>{if(memo[id])return memo[id];const out=[],seen={};let w=id;
+    while(W[w]&&!seen[w]){seen[w]=1;if(W[w].proj_node_flag!=='Y')out.push(W[w].wbs_name||'');w=W[w].parent_wbs_id}
+    return memo[id]=out.reverse()};
+}
+function wbsGen(s){return (s||'').replace(/\b(at|@)\s+(Whole\s+)?\d+(st|nd|rd|th)\s+(Pool\s+)?Lvl\b/gi,'')
+  .replace(/\b\d+(st|nd|rd|th)\s+(Pool\s+)?Lvl\b/gi,'').replace(/\bat\s+\d+(st|nd|rd|th)\s+to\s+(\d+(st|nd|rd|th)|Roof)\s+Lvl\b/gi,'')
+  .replace(/\s+/g,' ').replace(/^[\s\-&]+|[\s\-&]+$/g,'')}
+const segAt=(path,d)=>!path.length?'':(d>0&&d<=path.length?path[d-1]:path[path.length-1]);
+function levelOf(r,path,cfg,rx){
+  let m=rx.code?rx.code.exec(r.task_code||''):null;if(m)return parseInt(m[1],10);
+  if(rx.name){m=rx.name.exec(r.task_name||'');if(m)return parseInt(m[1],10)}
+  if(rx.wbs){for(let i=path.length-1;i>=0;i--){m=rx.wbs.exec(path[i]);if(m)return parseInt(m[1],10)}}
+  return null;
+}
+const lvRx=cfg=>({code:cfg.level_regex_code?new RegExp(cfg.level_regex_code):null,name:cfg.level_regex_name?new RegExp(cfg.level_regex_name):null,
+  wbs:cfg.level_regex_wbs?new RegExp(cfg.level_regex_wbs,'i'):null});
+
+function buildSchedule(tb,fileName,cfg){
+  const proj=(tb.PROJECT||[{}])[0]||{},pathOf=wbsPaths(tb),rx=lvRx(cfg);
+  const rules=cfg.tasks.map(t=>({id:t.id,code:t.code?new RegExp(t.code):null,name:t.name?new RegExp(t.name,'i'):null,
+    wbs:t.wbs?new RegExp(t.wbs,'i'):null,grp:t.wbs_group?[].concat(t.wbs_group):null,depth:+t.wbs_depth||0}));
+  const cells={},codes={};let total=0,withLevel=0,classified=0,progress=0;
+  for(const r of tb.TASK){
+    const code=r.task_code||'',name=r.task_name||'';
+    const s=pdate(r.act_start_date)||pdate(r.early_start_date)||pdate(r.target_start_date);
+    const f=pdate(r.act_end_date)||pdate(r.early_end_date)||pdate(r.target_end_date);
+    if(r.status_code==='TK_Active'||r.status_code==='TK_Complete')progress++;
+    const tf=parseFloat(r.total_float_hr_cnt);
+    total++;codes[code]=[s,f,name,r.cstr_type||'',pdate(r.cstr_date),isNaN(tf)?null:tf];
+    if(!s||!f)continue;
+    const path=pathOf(r.wbs_id),level=levelOf(r,path,cfg,rx);
+    if(level===null||isNaN(level)||level<cfg.level_min||level>cfg.level_max)continue;
+    withLevel++;const pstr=path.join(' > ');
+    for(const R of rules){
+      if(!R.code&&!R.name&&!R.wbs&&!R.grp)continue;if(R.code&&!R.code.test(code))continue;if(R.name&&!R.name.test(name))continue;
+      if(R.wbs&&!R.wbs.test(pstr))continue;if(R.grp&&!R.grp.includes(wbsGen(segAt(path,R.depth))))continue;
+      const tid=R.id;classified++;
+      const per=cells[tid]||(cells[tid]={}),c=per[level]||(per[level]={s:s,f:f,n:0,wd:0});
+      if(s<c.s)c.s=s;if(f>c.f)c.f=f;c.n++;c.wd+=(parseFloat(r.target_drtn_hr_cnt)||0)/8;break;
+    }
+  }
+  return {file:fileName,project:proj.proj_short_name||'',dataDate:(proj.last_recalc_date||'').slice(0,10),
+    counts:{total:total,with_level:withLevel,classified:classified,with_progress:progress},cells:cells,codes:codes};
+}
+/* Builds a config whose bands are the schedule's own WBS groups at the chosen depth (0 = lowest).
+   Groups present on fewer than 3 levels are left out; beyond 7 bands the rest fold into "Other". */
+function wbsConfig(tabs,depth,base,lang){
+  const cfg=JSON.parse(JSON.stringify(base));cfg.level_regex_wbs=cfg.level_regex_wbs||'(\\d+)(?:st|nd|rd|th)\\s+(?:Pool\\s+)?Lvl';
+  const rx=lvRx(cfg),G={};
+  tabs.forEach(tb=>{const pathOf=wbsPaths(tb);tb.TASK.forEach(r=>{
+    const s=pdate(r.act_start_date)||pdate(r.early_start_date)||pdate(r.target_start_date),f=pdate(r.act_end_date)||pdate(r.early_end_date)||pdate(r.target_end_date);
+    if(!s||!f)return;const path=pathOf(r.wbs_id),lv=levelOf(r,path,cfg,rx);if(lv===null||isNaN(lv)||lv<cfg.level_min||lv>cfg.level_max)return;
+    const g=wbsGen(segAt(path,depth));if(!g)return;const o=G[g]||(G[g]={n:0,lv:new Set(),st:[],fi:[]});
+    o.n++;o.lv.add(lv);o.st.push(dnum(s));o.fi.push(dnum(f))})});
+  let keep=Object.keys(G).filter(g=>G[g].lv.size>=3).sort((a,b)=>G[b].n-G[a].n);
+  const own=keep.slice(0,keep.length>8?7:8),rest=keep.slice(own.length);
+  own.sort((a,b)=>median(G[a].st)-median(G[b].st));
+  const other=lang==='es'?'Otros grupos WBS':'Other WBS groups',lvl=lang==='es'?' niveles':' levels',acts=lang==='es'?' actividades':' activities';
+  cfg.tasks=own.map((g,i)=>({id:'wbs'+(i+1),label:g,desc:'WBS: '+g+' · '+G[g].n+acts+' · '+G[g].lv.size+lvl,wbs_depth:depth,wbs_group:[g]}));
+  if(rest.length)cfg.tasks.push({id:'wbs_other',label:other,desc:'WBS: '+rest.join(' | '),wbs_depth:depth,wbs_group:rest});
+  /* "floor ready" = the group that finishes last; "wait" is measured from the group that finishes
+     closest before the ready group starts. If every other group overlaps it, no wait figure is shown. */
+  const byFin=own.slice().sort((a,b)=>median(G[a].fi)-median(G[b].fi)),ready=byFin[byFin.length-1];
+  cfg.ready_task='wbs'+(own.indexOf(ready)+1);
+  const before=own.filter(g=>g!==ready&&median(G[g].fi)<=median(G[ready].st)).sort((a,b)=>median(G[a].fi)-median(G[b].fi));
+  cfg.wait_from_task=before.length?'wbs'+(own.indexOf(before[before.length-1])+1):null;
+  cfg.subtitle=cfg.subtitle_en=cfg.subtitle_es=(lang==='es'?'Bandas = grupos WBS del cronograma':'Bands = schedule WBS groups')+' · '+
+    (depth?(lang==='es'?'nivel WBS ':'WBS level ')+depth:(lang==='es'?'nivel WBS más bajo':'lowest WBS level'));
+  cfg.tasks.forEach(t=>{delete t.label_en;delete t.desc_en});
+  return cfg;
+}
+function taskStats(per){
+  if(!per)return null;const lv=Object.keys(per).map(Number).sort((a,b)=>a-b);if(!lv.length)return null;
+  const steps=[];for(let i=1;i<lv.length;i++)steps.push((dnum(per[lv[i]].s)-dnum(per[lv[i-1]].s))/(lv[i]-lv[i-1]));
+  return {levels:lv.length,first:lv.map(l=>per[l].s).sort()[0],last:lv.map(l=>per[l].f).sort().pop(),
+    takt:steps.length?r1(median(steps)):null,dur:r1(median(lv.map(l=>dnum(per[l].f)-dnum(per[l].s)+1))),
+    work:r1(median(lv.map(l=>per[l].wd)))};
+}
+function msSide(s,code){
+  const h=code?s.codes[code]:null;if(!h||!(h[1]||h[0]))return null;
+  return {code:code,date:h[1]||h[0],name:h[2],cstr:h[3]||'',cstrDate:h[4]||null,tf:h[5]==null?null:r1(h[5]/8)};
+}
+function assemble(a,b,cfg,la,lb,today,lang){
+  const set=new Set();[a,b].forEach(s=>{for(const t in s.cells)for(const l in s.cells[t])set.add(+l)});
+  const levels=[...set].sort((x,y)=>x-y),labels={};
+  levels.forEach(l=>labels[l]=(cfg.level_labels||{})[l]||('L'+l));
+  const n=new Date(),compare=[];
+  (cfg.milestone_compare||[]).forEach(m=>{const sa=msSide(a,m.code_a||m.code),sb=msSide(b,m.code_b||m.code);
+    if(sa||sb)compare.push({label:loc(m,'label',lang),a:sa,b:sb})});
+  const out={lang:lang,msCompare:compare,title:cfg.title,subtitle:loc(cfg,'subtitle',lang),today:today||null,levels:levels,levelLabels:labels,
+    generated:n.getFullYear()+'-'+String(n.getMonth()+1).padStart(2,'0')+'-'+String(n.getDate()).padStart(2,'0'),
+    tasks:cfg.tasks.map(t=>({id:t.id,label:loc(t,'label',lang),desc:loc(t,'desc',lang)})),zones:cfg.zones||[],
+    readyTask:cfg.ready_task,waitFrom:cfg.wait_from_task,sched:[]};
+  [['A',a,la],['B',b,lb]].forEach(([key,s,label])=>{
+    const cells={},stats={};
+    for(const t in s.cells){cells[t]={};for(const l in s.cells[t]){const c=s.cells[t][l];cells[t][l]=[c.s,c.f,c.n,r1(c.wd)]}}
+    cfg.tasks.forEach(t=>stats[t.id]=taskStats(s.cells[t.id]));
+    const ms=[];(cfg.milestones||[]).forEach(m=>{if(m.only&&m.only!==key)return;const h=s.codes[m.code];
+      if(h&&h[1])ms.push({label:loc(m,'label',lang),date:h[1],levels:m.levels||null,name:h[2]})});
+    out.sched.push({key:key,label:label,file:s.file,project:s.project,dataDate:s.dataDate,counts:s.counts,cells:cells,milestones:ms,stats:stats});
+  });
+  return out;
+}
+function toCsv(D){
+  const q=v=>'"'+String(v).replace(/"/g,'""')+'"',names={};D.tasks.forEach(t=>names[t.id]=t.label);
+  const rows=[D.lang==='en'?['schedule','task','level','start','finish','activities','work_days']:['cronograma','tarea','nivel','inicio','fin','actividades','dias_trabajo']];
+  D.sched.forEach(s=>D.tasks.forEach(t=>{const per=s.cells[t.id]||{};
+    Object.keys(per).map(Number).sort((a,b)=>a-b).forEach(l=>{const c=per[l];rows.push([s.label,names[t.id],l,c[0],c[1],c[2],c[3]])})}));
+  return '﻿'+rows.map(r=>r.map(q).join(',')).join('\r\n');
+}
+
+/* ---------- upload form ---------- */
+(function(){
+  const UI={
+   en:{sub:'Flowlines by level from two Primavera P6 schedules (XER)',dropA:'Reference schedule',dropB:'Schedule to compare',pick:'Drop the XER here or choose it',
+     lang:'Language',labA:'Name of the first',labB:'Name of the second',hoy:'“Today” line (optional)',go:'Generate report',csv:'Download CSV',
+     rules:'Grouping rules (editable JSON)',priv:'Files are read in this browser. They are not sent to any server.',
+     start:'Choose the two XER files.',ready:'Ready to generate.',reading:'Reading files…',badJson:'The rules are not valid JSON: ',
+     fail:'Could not generate the report: ',noTask:'the file has no TASK table; is it a Primavera P6 XER?',noMatch:'no activity matched the rules. Check level_regex_code and tasks.',
+     defA:'Baseline',defB:'Revised schedule',cnt:(l,c,t)=>l+': '+c+' of '+t+' activities in the bands',file:'flowline_data.csv',
+     mode:'Grouping',mProp:'Proposed bands (Activity ID rules)',mWbs:'Schedule WBS',mCustom:'Custom JSON',depth:'WBS level',
+     d2:'Level 2 (areas)',d3:'Level 3',d4:'Level 4',d0:'Lowest level (per-floor groups)',jLoad:'Load JSON…',jSave:'Download JSON',
+     hProp:'Seven bands defined by Activity ID patterns, tuned to the Domus II coding.',
+     hWbs:'Bands are the scheduler\'s own WBS groups at the chosen level. Groups on fewer than 3 floors are left out; beyond 8 bands the smallest fold into “Other”.',
+     hCustom:'Uses the rules in the JSON box. Edit them, or load a JSON file saved earlier.',
+     needFiles:'Load both XER files first to build the WBS bands.',jsonFile:'flowline_rules.json',jsonOk:'Rules loaded from ',jsonBad:'That file is not valid JSON: '},
+   es:{sub:'Líneas de flujo por nivel a partir de dos cronogramas Primavera P6 (XER)',dropA:'Cronograma de referencia',dropB:'Cronograma a comparar',pick:'Arrastra aquí el XER o selecciónalo',
+     lang:'Idioma',labA:'Nombre del primero',labB:'Nombre del segundo',hoy:'Línea «Hoy» (opcional)',go:'Generar reporte',csv:'Descargar CSV',
+     rules:'Reglas de agrupación (JSON editable)',priv:'Los archivos se leen en este navegador. No se envían a ningún servidor.',
+     start:'Selecciona los dos archivos XER.',ready:'Listo para generar.',reading:'Leyendo archivos…',badJson:'Las reglas no son un JSON válido: ',
+     fail:'No se pudo generar el reporte: ',noTask:'el archivo no contiene la tabla TASK; ¿es un XER de Primavera P6?',noMatch:'ninguna actividad calzó con las reglas. Revisa level_regex_code y tasks.',
+     defA:'Línea base',defB:'Cronograma revisado',cnt:(l,c,t)=>l+': '+c+' de '+t+' actividades en las bandas',file:'flowline_datos.csv',
+     mode:'Agrupación',mProp:'Bandas propuestas (reglas por Activity ID)',mWbs:'WBS del cronograma',mCustom:'JSON personalizado',depth:'Nivel WBS',
+     d2:'Nivel 2 (áreas)',d3:'Nivel 3',d4:'Nivel 4',d0:'Nivel más bajo (grupos por piso)',jLoad:'Cargar JSON…',jSave:'Descargar JSON',
+     hProp:'Siete bandas definidas por patrones de Activity ID, ajustadas a la codificación de Domus II.',
+     hWbs:'Las bandas son los grupos WBS del propio cronograma en el nivel elegido. Los grupos presentes en menos de 3 pisos quedan fuera; pasadas 8 bandas, las más pequeñas se juntan en «Otros».',
+     hCustom:'Usa las reglas del recuadro JSON. Edítalas o carga un JSON guardado antes.',
+     needFiles:'Carga primero los dos XER para armar las bandas por WBS.',jsonFile:'flowline_reglas.json',jsonOk:'Reglas cargadas desde ',jsonBad:'Ese archivo no es un JSON válido: '}};
+  const $=id=>document.getElementById(id),files={A:null,B:null},parsed={};let last=null,lang='en',msgKey='start',msgTxt=null,mode='proposed';
+  try{if((navigator.language||'').toLowerCase().startsWith('es'))lang='es'}catch(e){}
+  $('lang').value=lang;
+  const say=(t,err)=>{$('msg').textContent=t;$('msg').classList.toggle('err',!!err)};
+  function applyLang(){
+    const prev=UI[lang];lang=$('lang').value;const u=UI[lang];document.documentElement.lang=lang;
+    document.querySelectorAll('[data-i]').forEach(e=>{const k=e.getAttribute('data-i');if(k==='pick'&&files[e.id.slice(-1)])return;e.textContent=u[k]});
+    ['A','B'].forEach(k=>{const i=$('lab'+k);if(!i.value||i.value===prev['def'+k]||i.value===UI.en['def'+k]||i.value===UI.es['def'+k])i.value=u['def'+k]});
+    if(!last)$('sub').textContent=u.sub;
+    if(msgKey)say(u[msgKey]);
+    $('modeHelp').textContent=u[{proposed:'hProp',wbs:'hWbs',custom:'hCustom'}[mode]];
+  }
+  function setMode(m,fill){
+    mode=m;$('mode').value=m;$('depthWrap').hidden=m!=='wbs';
+    $('modeHelp').textContent=UI[lang][{proposed:'hProp',wbs:'hWbs',custom:'hCustom'}[m]];
+    if(fill&&m==='proposed')$('cfg').value=JSON.stringify(DEFAULT_CONFIG,null,2);
+    if(m==='custom')$('cfgBox').open=true;
+  }
+  $('mode').addEventListener('change',()=>{setMode($('mode').value,true);if(mode!=='custom'&&last)generate()});
+  $('depth').addEventListener('change',()=>{if(last)generate()});
+  $('cfg').addEventListener('input',()=>{if(mode!=='custom')setMode('custom')});
+  $('jsonLoad').addEventListener('click',()=>$('jsonFile').click());
+  $('jsonFile').addEventListener('change',async()=>{const f=$('jsonFile').files[0];if(!f)return;
+    try{const t=await f.text();JSON.parse(t);$('cfg').value=t;setMode('custom');msgKey=null;say(UI[lang].jsonOk+f.name);if(last)generate()}
+    catch(e){say(UI[lang].jsonBad+e.message,true)}$('jsonFile').value=''});
+  $('jsonSave').addEventListener('click',()=>{
+    const url=URL.createObjectURL(new Blob([$('cfg').value],{type:'application/json'}));
+    const a=document.createElement('a');a.href=url;a.download=UI[lang].jsonFile;document.body.appendChild(a);a.click();a.remove();
+    setTimeout(()=>URL.revokeObjectURL(url),1000)});
+  $('lang').addEventListener('change',()=>{applyLang();if(last)generate()});
+  applyLang();setMode('proposed',true);
+  function setFile(k,f){
+    if(!f)return;files[k]=f;delete parsed[k];$('fn'+k).textContent=f.name+' · '+(f.size/1048576).toFixed(1)+' MB';
+    $('drop'+k).classList.add('ok');$('go').disabled=!(files.A&&files.B);
+    if(files.A&&files.B){msgKey='ready';say(UI[lang].ready)}
+  }
+  ['A','B'].forEach(k=>{
+    const d=$('drop'+k),inp=$('file'+k);
+    inp.addEventListener('change',()=>setFile(k,inp.files[0]));
+    ['dragenter','dragover'].forEach(e=>d.addEventListener(e,ev=>{ev.preventDefault();d.classList.add('over')}));
+    ['dragleave','drop'].forEach(e=>d.addEventListener(e,ev=>{ev.preventDefault();d.classList.remove('over')}));
+    d.addEventListener('drop',ev=>setFile(k,ev.dataTransfer.files[0]));
+  });
+  const read=f=>f.arrayBuffer().then(b=>new TextDecoder('windows-1252').decode(b));
+  async function generate(){
+    const u=UI[lang];let cfg;msgKey=null;
+    if(mode==='custom'){try{cfg=JSON.parse($('cfg').value)}catch(e){say(u.badJson+e.message,true);return}}
+    if(!(files.A&&files.B)){say(u.needFiles,true);return}
+    say(u.reading);$('go').disabled=true;
+    try{
+      for(const k of ['A','B'])if(!parsed[k])parsed[k]=parseXer(await read(files[k]));
+      if(mode==='proposed')cfg=JSON.parse(JSON.stringify(DEFAULT_CONFIG));
+      if(mode==='wbs'){cfg=wbsConfig([parsed.A,parsed.B],+$('depth').value,DEFAULT_CONFIG,lang)}
+      if(mode!=='custom')$('cfg').value=JSON.stringify(cfg,null,2);
+      const a=buildSchedule(parsed.A,files.A.name,cfg),b=buildSchedule(parsed.B,files.B.name,cfg);
+      const D=assemble(a,b,cfg,$('labA').value.trim()||'A',$('labB').value.trim()||'B',$('hoy').value||null,lang);
+      if(!D.levels.length)throw new Error('NO_MATCH');
+      $('report').hidden=false;renderReport(D);last=D;window.__lastData=D;$('csv').disabled=false;
+      document.title=D.title;
+      say(D.sched.map(s=>u.cnt(s.label,s.counts.classified,s.counts.total)).join(' · '));
+    }catch(e){say(u.fail+(e.message==='NO_TASK'?u.noTask:e.message==='NO_MATCH'?u.noMatch:e.message),true)}
+    $('go').disabled=false;
+  }
+  $('go').addEventListener('click',generate);
+  $('csv').addEventListener('click',()=>{
+    if(!last)return;const url=URL.createObjectURL(new Blob([toCsv(last)],{type:'text/csv;charset=utf-8'}));
+    const a=document.createElement('a');a.href=url;a.download=UI[lang].file;document.body.appendChild(a);a.click();a.remove();
+    setTimeout(()=>URL.revokeObjectURL(url),1000);
+  });
+})();
+</script>
+
+</body></html>
